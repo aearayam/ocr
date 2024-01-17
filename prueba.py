@@ -20,7 +20,7 @@ imagen_preprocesada = np.array(imagen_pil)
 
 texto = pytesseract.image_to_string(imagen, lang='spa')
 
-print('Texto de la imagen: ')
+print('Texto de la imagen: aaa')
 print(texto)
 
 cv2.imshow('Imagen', imagen)
