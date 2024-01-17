@@ -15,7 +15,7 @@ def extraerTextoImagen(imagen):
             # la imagen ya está en escala de grises, no es necesario convertirla
             imagen_gris = imagen
         else:
-            # la imagen está en 3 canales (RGB), hay que convertirla a escala de grises
+            # la imagen está en 3 canales (RGB), hay que convertirla a escala de grises (1 canal)
             imagen_gris = cv2.cvtColor(imagen, cv2.COLOR_BGR2GRAY)
      
         imagen_pil = Image.fromarray(imagen_gris)
