@@ -112,8 +112,8 @@ def procesarWord(word_ruta, archivo_salida):
 def removerFirmas():
     return
 
-directorio_entrada = r'C:\Users\aarayam\Desktop\prueba\documentos_originales'
-directorio_salida = r'C:\Users\aarayam\Desktop\prueba\documentos_convertidos'
+directorio_entrada = r'C:\Users\aarayam\Desktop\documentos_prueba\documentos_originales'
+directorio_salida = r'C:\Users\aarayam\Desktop\documentos_prueba\documentos_convertidos'
 
 # recorre los archivos pdf del directorio para convertirlos
 for archivo in os.listdir(directorio_entrada):
