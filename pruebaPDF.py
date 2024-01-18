@@ -39,21 +39,11 @@ def procesarPDF(pdf_ruta, archivo_salida):
     nuevo_doc = fitz.open()
 
     for num_pagina in range(doc.page_count):
+
         pagina = doc[num_pagina]
-        imagenes = pagina.get_images(full=True)
 
-        texto_pagina = ""
-
-        for num_img, info_img in enumerate(imagenes):
-            indice_img = info_img[0]
-            img = doc.extract_image(indice_img)
-            data_img = img["image"]
-            imagen = Image.open(io.BytesIO(data_img))
-
-            texto_imagen = extraerTextoImagen(np.array(imagen))
-
-            if isinstance(texto_imagen, str) and texto_imagen.strip():
-                texto_pagina += texto_imagen + "\n"
+        # lista para almacenar bloques de texto e imagenes en orden segun documento original
+        bloques_ordenados = []
 
         # se recorre cada bloque de texto en la página y se agrega al nuevo documento PDF
         for bloque in pagina.get_text("blocks"):
@@ -64,11 +54,58 @@ def procesarPDF(pdf_ruta, archivo_salida):
             if isinstance(texto_bloque, str) and texto_bloque.startswith("<image:"):
                 continue
 
-            if isinstance(texto_bloque, str) and texto_bloque.strip():
-                texto_pagina += texto_bloque + "\n"
+            elif isinstance(texto_bloque, str) and texto_bloque.strip():
+                bbox = bloque[0] if len(bloque) > 0 else fitz.Rect(0, 0, 0, 0)
+                bloques_ordenados.append(("texto", {"texto": texto_bloque, "bbox": bbox}))
 
+        imagenes = pagina.get_images(full=True)
+
+        for num_img, info_img in enumerate(imagenes):
+
+            indice_img = info_img[0]
+            img = doc.extract_image(indice_img)
+            data_img = img["image"]
+            imagen = Image.open(io.BytesIO(data_img))
+
+            texto_imagen = extraerTextoImagen(np.array(imagen))
+
+            if isinstance(texto_imagen, str) and texto_imagen.strip():
+                bloques_ordenados.append(("imagen", {"texto": texto_imagen, "bbox": fitz.Rect(0, 0, 0, 0)}))
+
+        # Ordenar bloques en base a la posición x y agregar al nuevo documento
+        bloques_ordenados = sorted(bloques_ordenados, key=lambda x: getattr(x[1]["bbox"], "x0", 0) if x[0] == "texto" else getattr(x[1]["bbox"], "x1", 0))
+
+        # Crear una nueva página en el nuevo documento
         nueva_pagina = nuevo_doc.new_page(width=pagina.rect.width, height=pagina.rect.height)
-        nueva_pagina.insert_text((50, 50), texto_pagina)
+
+        # inicializar la posición Y
+        posicion_y = 50  # posicion inicial
+
+        # insertar textos extraidos (de imagenes y textos) en paginas de documento nuevo
+        for tipo, bloque in bloques_ordenados:
+            if tipo == "texto":
+                texto_bloque = bloque["texto"]
+                
+                if isinstance(bloque["bbox"], fitz.Rect):
+                    altura_bloque = bloque["bbox"].y1 - bloque["bbox"].y0  # Altura del bloque de texto
+                else:
+                    # Si no es un objeto Rect, asumimos la altura como un valor predeterminado
+                    altura_bloque = 10  # Ajusta esto según tus necesidades
+
+                nueva_pagina.insert_text((50, posicion_y), texto_bloque)
+
+            elif tipo == "imagen":
+                texto_imagen = bloque["texto"]
+                if isinstance(bloque["bbox"], fitz.Rect):
+                    altura_bloque = bloque["bbox"].y1 - bloque["bbox"].y0  # Altura del bloque de imagen
+                else:
+                    # Si no es un objeto Rect, asumimos la altura como un valor predeterminado
+                    altura_bloque = 10  # Ajusta esto según tus necesidades
+                    
+                nueva_pagina.insert_text((50, posicion_y), texto_imagen)
+
+            # Actualizar la posición y para el próximo bloque
+            posicion_y += altura_bloque + 15  # Ajusta esto según la separación deseada (puede variar según el tamaño del texto)
 
     nuevo_doc.save(archivo_salida)
 
