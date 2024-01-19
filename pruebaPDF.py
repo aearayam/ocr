@@ -1,10 +1,17 @@
 from PIL import ImageEnhance, ImageFilter, Image
 from docx import Document
 import numpy as np
-import pytesseract, fitz, cv2, PyPDF2, io, os
+import psycopg2, pytesseract, fitz, cv2, PyPDF2, io, os
 
 
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
+
+try:
+    conn = psycopg2.connect(dbname='bd_prueba', user='postgres', password='postgres', host='localhost', port=5432)
+    print("Conexión a la bd exitosa!")
+except psycopg2.Error as e:
+    print("Error al conectar a la base de datos:", e)
+
 
 # extrae texto de una imagen
 def extraerTextoImagen(imagen):
@@ -32,36 +39,34 @@ def extraerTextoImagen(imagen):
         return ""
 
 # procesa los documentos PDF con imagenes para convertirlos en documentos PDF de texto
-def procesarPDF(pdf_ruta, archivo_salida):
+def procesarPDF(documento):
 
-    doc = fitz.open(pdf_ruta)
+    try:
+        cur = conn.cursor()
 
-    nuevo_doc = fitz.open()
+        path = documento[1] + documento[5]  # se concatena la ruta con el nombre del documento
 
-    for num_pagina in range(doc.page_count):
+        doc = fitz.open(path)
 
-        pagina = doc[num_pagina]
+        print(path)
 
-        # lista para almacenar bloques de texto e imagenes en orden segun documento original
-        bloques_ordenados = []
+        # texto normal
+        texto_contenido = ""
 
-        # se recorre cada bloque de texto en la página y se agrega al nuevo documento PDF
-        for bloque in pagina.get_text("blocks"):
-
+        for bloque in doc.get_text("blocks"):
             texto_bloque = bloque[4]
 
             # verifica si el bloque contiene información de imagen
             if isinstance(texto_bloque, str) and texto_bloque.startswith("<image:"):
                 continue
 
-            elif isinstance(texto_bloque, str) and texto_bloque.strip():
-                bbox = bloque[0] if len(bloque) > 0 else fitz.Rect(0, 0, 0, 0)
-                bloques_ordenados.append(("texto", {"texto": texto_bloque, "bbox": bbox}))
+            if isinstance(texto_bloque, str) and texto_bloque.strip():
+                texto_contenido += texto_bloque + " "
 
-        imagenes = pagina.get_images(full=True)
+        imagenes = doc.get_images(full=True)
 
+        # Texto de imágenes
         for num_img, info_img in enumerate(imagenes):
-
             indice_img = info_img[0]
             img = doc.extract_image(indice_img)
             data_img = img["image"]
@@ -70,53 +75,52 @@ def procesarPDF(pdf_ruta, archivo_salida):
             texto_imagen = extraerTextoImagen(np.array(imagen))
 
             if isinstance(texto_imagen, str) and texto_imagen.strip():
-                bloques_ordenados.append(("imagen", {"texto": texto_imagen, "bbox": fitz.Rect(0, 0, 0, 0)}))
+                texto_contenido += texto_imagen + " "
 
-        # Ordenar bloques en base a la posición x y agregar al nuevo documento
-        bloques_ordenados = sorted(bloques_ordenados, key=lambda x: getattr(x[1]["bbox"], "x0", 0) if x[0] == "texto" else getattr(x[1]["bbox"], "x1", 0))
+        '''
+        print("Texto a insertar:", texto_contenido)
+        print("Consulta SQL:", cur.mogrify("UPDATE documento SET contenido = %s WHERE id = %s;", (texto_contenido, documento[0])))
+        '''
+        
+        # actualizar el contenido en la base de datos (insertar el texto extraido)
+        cur.execute("UPDATE documento SET contenido = %s WHERE id = %s;", (texto_contenido, documento[0]))
 
-        # Crear una nueva página en el nuevo documento
-        nueva_pagina = nuevo_doc.new_page(width=pagina.rect.width, height=pagina.rect.height)
+        # Confirmar la transacción y cerrar la conexión
+        conn.commit()
+        cur.close()
 
-        # inicializar la posición Y
-        posicion_y = 50  # posicion inicial
+        return True
 
-        # insertar textos extraidos (de imagenes y textos) en paginas de documento nuevo
-        for tipo, bloque in bloques_ordenados:
-            if tipo == "texto":
-                texto_bloque = bloque["texto"]
-                
-                if isinstance(bloque["bbox"], fitz.Rect):
-                    altura_bloque = bloque["bbox"].y1 - bloque["bbox"].y0  # Altura del bloque de texto
-                else:
-                    # Si no es un objeto Rect, asumimos la altura como un valor predeterminado
-                    altura_bloque = 10  # Ajusta esto según tus necesidades
+    except Exception as e:
+        print("Error durante la ejecución:", e)
+        return False
 
-                nueva_pagina.insert_text((50, posicion_y), texto_bloque)
+# iterar sobre los registros para extraer texto de aquellos que tengan estado_procesamiento = 0
+try:
+    cur = conn.cursor()
 
-            elif tipo == "imagen":
-                texto_imagen = bloque["texto"]
-                if isinstance(bloque["bbox"], fitz.Rect):
-                    altura_bloque = bloque["bbox"].y1 - bloque["bbox"].y0  # Altura del bloque de imagen
-                else:
-                    # Si no es un objeto Rect, asumimos la altura como un valor predeterminado
-                    altura_bloque = 10  # Ajusta esto según tus necesidades
-                    
-                nueva_pagina.insert_text((50, posicion_y), texto_imagen)
+    # obtener los registros con estado_procesamiento = 0
+    cur.execute("SELECT * FROM documento WHERE estado_procesamiento = 0")
+    documentos_sin_procesar = cur.fetchall()
 
-            # Actualizar la posición y para el próximo bloque
-            posicion_y += altura_bloque + 15  # Ajusta esto según la separación deseada (puede variar según el tamaño del texto)
+    # Iterar sobre los registros y procesar el PDF
+    for documento in documentos_sin_procesar:
+        print(documento[0])
+        try:
+            if procesarPDF(documento):
+                print(documento[0])
+                # actualiza el estado_procesamiento a 1 después de procesar
+                cur.execute("UPDATE documento SET estado_procesamiento = 1 WHERE id = %s;", (documento,))
+                conn.commit()
+        except Exception as e:
+            print(f"Error al procesar el documento {documento}: {e}")
+            
+finally:
+    # Cerrar la conexión al final
+    if conn:
+        conn.close()
 
-    nuevo_doc.save(archivo_salida)
-
-# HACER FUNCION
-# elimina firmas digitales en documentos pdf
-def removerFirmas():
-    return
-
-directorio_entrada = r'C:\Users\aarayam\Desktop\documentos_prueba\documentos_originales'
-directorio_salida = r'C:\Users\aarayam\Desktop\documentos_prueba\documentos_convertidos'
-
+'''
 # recorre los archivos pdf del directorio para convertirlos
 for archivo in os.listdir(directorio_entrada):
     if archivo.endswith(".pdf"):
@@ -125,17 +129,18 @@ for archivo in os.listdir(directorio_entrada):
         archivo_salida = os.path.join(directorio_salida, f"convertido_{archivo_sin_extension}.pdf")
         procesarPDF(archivo_entrada, archivo_salida)
     elif archivo.endswith(".docx"):
-        '''
         archivo_entrada = os.path.join(directorio_entrada, archivo)
         archivo_sin_extension, _ = os.path.splitext(archivo)
         archivo_salida = os.path.join(directorio_salida, f"convertido_{archivo_sin_extension}.pdf")
         procesarWord(archivo_entrada, archivo_salida)
-        '''
                 
         print("documento no es PDF")
-
+    else:
+        print("documento no es PDF")
 
 print("DOCUMENTOS CONVERTIDOS A TEXTO OK")
+
+'''
 
 # filtrar documentos por palabra o texto en el nombre de archivo o en el contenido
 def buscar_documentos(texto_busqueda, directorio):
@@ -153,9 +158,9 @@ def buscar_documentos(texto_busqueda, directorio):
                 try:
                     doc = fitz.open(ruta_archivo)
                     for num_pagina in range(doc.page_count):
-                        texto_pagina = doc[num_pagina].get_text()
+                        texto_contenido = doc[num_pagina].get_text()
                         # verifica si el texto de busqueda se encuentra en el contenido del documento
-                        if texto_busqueda.lower() in texto_pagina.lower():
+                        if texto_busqueda.lower() in texto_contenido.lower():
                             documentos_coincidentes.append(ruta_archivo)
                             break
                 except Exception as e:
@@ -163,6 +168,7 @@ def buscar_documentos(texto_busqueda, directorio):
 
     return documentos_coincidentes
 
+'''
 # codigo busqueda ejemplo
 texto_a_buscar = 'HOLA' # CADENA DE TEXTO A BUSCAR
 
@@ -174,3 +180,4 @@ if documentos_coincidentes:
         print(documento)
 else:
     print(f"No se encontraron documentos que contengan '{texto_a_buscar}'.")
+'''
