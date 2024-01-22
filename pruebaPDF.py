@@ -14,7 +14,7 @@ except psycopg2.Error as e:
 
 
 # extrae texto de una imagen
-def extraerTextoImagen(imagen):
+def extraer_texto_imagen(imagen):
 
     try:
         # se verifica si la imagen ya está en escala de grises
@@ -39,7 +39,7 @@ def extraerTextoImagen(imagen):
         return ""
 
 # procesa los documentos PDF con imagenes para convertirlos en documentos PDF de texto
-def procesarPDF(documento):
+def procesar_pdf(documento):
 
     try:
         cur = conn.cursor()
@@ -80,7 +80,7 @@ def procesarPDF(documento):
                 data_img = img["image"]
                 imagen = Image.open(io.BytesIO(data_img))
 
-                texto_imagen = extraerTextoImagen(np.array(imagen))
+                texto_imagen = extraer_texto_imagen(np.array(imagen))
 
                 if isinstance(texto_imagen, str) and texto_imagen.strip():
                     texto_contenido += texto_imagen + " "
@@ -113,10 +113,12 @@ try:
 
     # Iterar sobre los registros y procesar el PDF
     for documento in documentos_sin_procesar:
-        print(documento[0])
+        # print(documento[0])
         try:
-            if procesarPDF(documento):
-                print(documento[0])
+            if procesar_pdf(documento):
+                #print(documento[0])
+                # se convierte el campo "contenido" a tsvector y se actualiza insertando al campo "contenido_vector"
+                cur.execute("UPDATE documento SET contenido_vector = to_tsvector('spanish', contenido) WHERE id = %s;", (documento[0],))
                 # actualiza el estado_procesamiento a 1 después de procesar
                 cur.execute("UPDATE documento SET estado_procesamiento = 1 WHERE id = %s;", (documento[0],))
                 conn.commit()
@@ -135,7 +137,7 @@ for archivo in os.listdir(directorio_entrada):
         archivo_entrada = os.path.join(directorio_entrada, archivo)
         archivo_sin_extension, _ = os.path.splitext(archivo)
         archivo_salida = os.path.join(directorio_salida, f"convertido_{archivo_sin_extension}.pdf")
-        procesarPDF(archivo_entrada, archivo_salida)
+        procesar_pdf(archivo_entrada, archivo_salida)
     elif archivo.endswith(".docx"):
         archivo_entrada = os.path.join(directorio_entrada, archivo)
         archivo_sin_extension, _ = os.path.splitext(archivo)
@@ -189,3 +191,38 @@ if documentos_coincidentes:
 else:
     print(f"No se encontraron documentos que contengan '{texto_a_buscar}'.")
 '''
+
+def buscar_documentos_por_texto(texto_a_buscar):
+    try:
+
+        conn = psycopg2.connect(dbname='bd_prueba', user='postgres', password='postgres', host='localhost', port=5432)
+
+        cur = conn.cursor()
+
+        # Convertir el texto de búsqueda a una consulta tsquery sin procesar
+        tsquery = f"plainto_tsquery('spanish', %s)"
+        
+        # Realizar la búsqueda en la base de datos
+        cur.execute("SELECT * FROM documento WHERE contenido_vector @@ " + tsquery + ";", (texto_a_buscar,))
+        resultados = cur.fetchall()
+
+        return resultados
+
+    except Exception as e:
+        print("Error al realizar la búsqueda:", e)
+
+    finally:
+        # Cerrar la conexión al final
+        if conn:
+            conn.close()
+
+
+texto_a_buscar = 'texto al final del documento'
+resultados = buscar_documentos_por_texto(texto_a_buscar)
+
+print('Documentos que contienen: ' + texto_a_buscar + ".")
+if resultados:
+    for resultado in resultados:
+        print(resultado[5])
+else:
+    print("No se encontraron resultados.")
