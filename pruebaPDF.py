@@ -44,7 +44,8 @@ def procesarPDF(documento):
     try:
         cur = conn.cursor()
 
-        path = documento[1] + documento[5]  # se concatena la ruta con el nombre del documento
+        # path = documento[1] + documento[5]  # se concatena la ruta con el nombre del documento
+        path = os.path.join(documento[1], documento[5])
 
         doc = fitz.open(path)
 
@@ -53,6 +54,7 @@ def procesarPDF(documento):
         # texto normal
         texto_contenido = ""
 
+        '''
         for bloque in doc.get_text("blocks"):
             texto_bloque = bloque[4]
 
@@ -62,20 +64,26 @@ def procesarPDF(documento):
 
             if isinstance(texto_bloque, str) and texto_bloque.strip():
                 texto_contenido += texto_bloque + " "
+        '''
 
-        imagenes = doc.get_images(full=True)
+        for pagina in range(doc.page_count):
 
-        # Texto de imágenes
-        for num_img, info_img in enumerate(imagenes):
-            indice_img = info_img[0]
-            img = doc.extract_image(indice_img)
-            data_img = img["image"]
-            imagen = Image.open(io.BytesIO(data_img))
+            page = doc[pagina]
+            texto_contenido += page.get_text("text") + " "
 
-            texto_imagen = extraerTextoImagen(np.array(imagen))
+            # Extraer imágenes
+            imagenes = page.get_images(full=True)
 
-            if isinstance(texto_imagen, str) and texto_imagen.strip():
-                texto_contenido += texto_imagen + " "
+            for num_img, info_img in enumerate(imagenes):
+                indice_img = info_img[0]
+                img = doc.extract_image(indice_img)
+                data_img = img["image"]
+                imagen = Image.open(io.BytesIO(data_img))
+
+                texto_imagen = extraerTextoImagen(np.array(imagen))
+
+                if isinstance(texto_imagen, str) and texto_imagen.strip():
+                    texto_contenido += texto_imagen + " "
 
         '''
         print("Texto a insertar:", texto_contenido)
@@ -110,7 +118,7 @@ try:
             if procesarPDF(documento):
                 print(documento[0])
                 # actualiza el estado_procesamiento a 1 después de procesar
-                cur.execute("UPDATE documento SET estado_procesamiento = 1 WHERE id = %s;", (documento,))
+                cur.execute("UPDATE documento SET estado_procesamiento = 1 WHERE id = %s;", (documento[0],))
                 conn.commit()
         except Exception as e:
             print(f"Error al procesar el documento {documento}: {e}")
