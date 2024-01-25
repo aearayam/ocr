@@ -4,6 +4,8 @@ import numpy as np
 import psycopg2, pytesseract, fitz, cv2, PyPDF2, io, os
 
 
+
+
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract'
 
 try:
@@ -30,7 +32,7 @@ def extraer_texto_imagen(imagen):
         imagen_pil = imagen_pil.filter(ImageFilter.SHARPEN)
         imagen_preprocesada = np.array(imagen_pil)
 
-        texto = pytesseract.image_to_string(imagen_preprocesada, lang='spa')
+        texto = pytesseract.image_to_string(imagen_preprocesada, lang='spa', config='--psm 6 --oem 3') #config='--psm 6 --oem 3'
         return texto.strip()
     
     except Exception as e:
@@ -53,6 +55,8 @@ def procesar_pdf(documento):
 
         # texto normal
         texto_contenido = ""
+
+        contador_imagenes = 0
 
         '''
         for bloque in doc.get_text("blocks"):
@@ -77,19 +81,33 @@ def procesar_pdf(documento):
             for num_img, info_img in enumerate(imagenes):
                 indice_img = info_img[0]
                 img = doc.extract_image(indice_img)
-                data_img = img["image"]
-                imagen = Image.open(io.BytesIO(data_img))
 
-                texto_imagen = extraer_texto_imagen(np.array(imagen))
+                try:
+                    # Verificar si es un formato de imagen válido antes de procesarlo
+                    Image.open(io.BytesIO(img["image"]))
+                    
+                    imagen = Image.open(io.BytesIO(img["image"]))
+                    texto_imagen = extraer_texto_imagen(np.array(imagen))
 
-                if isinstance(texto_imagen, str) and texto_imagen.strip():
-                    texto_contenido += texto_imagen + " "
+                    if isinstance(texto_imagen, str) and texto_imagen.strip():
+                        texto_contenido += texto_imagen + " "
+
+                    contador_imagenes += 1
+                    
+
+                except Exception as e:
+                    print(f"Error al procesar la imagen: {str(e)}")
+                    contador_imagenes += 1
+
+                
 
         '''
         print("Texto a insertar:", texto_contenido)
         print("Consulta SQL:", cur.mogrify("UPDATE documento SET contenido = %s WHERE id = %s;", (texto_contenido, documento[0])))
         '''
         
+        print (contador_imagenes)
+
         # actualizar el contenido en la base de datos (insertar el texto extraido)
         cur.execute("UPDATE documento SET contenido = %s WHERE id = %s;", (texto_contenido, documento[0]))
 
@@ -126,7 +144,7 @@ try:
             print(f"Error al procesar el documento {documento}: {e}")
             
 finally:
-    # Cerrar la conexión al final
+    # se cierra la conexión
     if conn:
         conn.close()
 
@@ -203,7 +221,13 @@ def buscar_documentos_por_texto(texto_a_buscar):
         tsquery = f"plainto_tsquery('spanish', %s)"
         
         # Realizar la búsqueda en la base de datos
-        cur.execute("SELECT * FROM documento WHERE contenido_vector @@ " + tsquery + ";", (texto_a_buscar,))
+        # cur.execute("SELECT * FROM documento WHERE contenido_vector @@ " + tsquery + ";", (texto_a_buscar,))    # solo se busca en el contenido (contenido_vector)
+        cur.execute("""
+            SELECT *
+            FROM documento
+            WHERE contenido_vector @@ """ + tsquery + """
+            OR nombre_documento ILIKE %s;
+        """, (texto_a_buscar, texto_a_buscar))
         resultados = cur.fetchall()
 
         return resultados
@@ -217,10 +241,10 @@ def buscar_documentos_por_texto(texto_a_buscar):
             conn.close()
 
 
-texto_a_buscar = 'texto al final del documento'
+texto_a_buscar = 'lorem ipsuM'
 resultados = buscar_documentos_por_texto(texto_a_buscar)
 
-print('Documentos que contienen: ' + texto_a_buscar + ".")
+print('Documentos que contienen: ' + texto_a_buscar)
 if resultados:
     for resultado in resultados:
         print(resultado[5])
